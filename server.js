@@ -210,7 +210,7 @@ app.get('/form/:id', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'form.html'));
 });
 
-// Приём ответов с валидацией обязательных полей, лимитов символов и расширений файлов
+// Приём ответов с валидацией обязательных полей, лимитов символов, цифр в тексте и расширений файлов
 app.post('/api/form/:id', upload.any(), (req, res, next) => {
   const formId = req.params.id;
 
@@ -225,11 +225,12 @@ app.post('/api/form/:id', upload.any(), (req, res, next) => {
     const fields = JSON.parse(form.fields);
     const answers = {};
 
-    // Проверка обязательных полей на сервере
+    // Проверка обязательных полей и форматов данных на сервере
     for (const field of fields) {
       const uploadedFile = req.files ? req.files.find(f => f.fieldname === field.id) : null;
       const textValue = req.body[field.id];
 
+      // 1. Проверка обязательных полей
       if (field.required) {
         if (field.type === 'file' && !uploadedFile) {
           if (req.files) req.files.forEach(f => { try { fs.unlinkSync(f.path); } catch (e) {} });
@@ -241,7 +242,7 @@ app.post('/api/form/:id', upload.any(), (req, res, next) => {
         }
       }
 
-      // Постоянная проверка длины текста на сервере
+      // 2. Валидация длины текста
       if (textValue && field.type !== 'file') {
         const strLength = String(textValue).length;
         
@@ -253,6 +254,18 @@ app.post('/api/form/:id', upload.any(), (req, res, next) => {
         if (field.type !== 'textarea' && strLength > 255) {
           if (req.files) req.files.forEach(f => { try { fs.unlinkSync(f.path); } catch (e) {} });
           return res.status(400).json({ success: false, error: `Поле "${field.label}" не должно превышать 255 символов` });
+        }
+      }
+
+      // 3. Проверка на отсутствие цифр в текстовом поле
+      if (field.type === 'text' && textValue && textValue.trim() !== '') {
+        // Регулярное выражение /\d/ ищет хотя бы одну цифру в строке
+        if (/\d/.test(textValue)) {
+          if (req.files) req.files.forEach(f => { try { fs.unlinkSync(f.path); } catch (e) {} });
+          return res.status(400).json({ 
+            success: false, 
+            error: `Поле "${field.label}" не должно содержать цифры. Пожалуйста, используйте только буквы.` 
+          });
         }
       }
     }
