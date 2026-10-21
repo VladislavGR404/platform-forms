@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Отклик на форму</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <!-- Библиотека для рендеринга Markdown -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <style>
+    body {
+      background-color: #f8f9fa;
+      color: #212529;
+    }
+    .form-card {
+      border: none;
+      border-radius: 12px;
+      box-shadow: 0 4px 24px rgba(0, 0, 0, 0.06);
+    }
+    .form-control, .form-select {
+      padding: 0.65rem 0.85rem;
+      border-radius: 8px;
+      border-color: #dee2e6;
+    }
+    .form-control:focus, .form-select:focus {
+      border-color: #86b7fe;
+      box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.15);
+    }
+    .form-label {
+      font-weight: 500;
+      color: #343a40;
+      margin-bottom: 0.4rem;
+    }
+    .btn-primary {
+      padding: 0.75rem 2rem;
+      border-radius: 8px;
+      font-weight: 500;
+      background-color: #2563eb;
+      border-color: #2563eb;
+    }
+    .btn-primary:hover {
+      background-color: #1d4ed8;
+      border-color: #1d4ed8;
+    }
+  </style>
+</head>
+<body>
+  <div class="container py-5" style="max-width: 600px;">
+    <div class="card form-card">
+      <div class="card-body p-5">
+        <h3 id="formTitle" class="mb-2 text-center fw-bold text-dark">Загрузка формы...</h3>
+        <!-- Блок для отображения Markdown-описания формы -->
+        <div id="formDescription" class="text-muted mb-4 text-center"></div>
+        
+        <!-- Прогресс-бар заполнения формы -->
+        <div id="progressContainer" class="mb-4 d-none">
+          <div class="d-flex justify-content-between align-items-center mb-1">
+            <small class="text-muted fw-bold" id="progressText">Заполнено 0 из 0 обязательных полей</small>
+            <small class="text-primary fw-bold" id="progressPercent">0%</small>
+          </div>
+          <div class="progress" style="height: 8px; background-color: #e9ecef;">
+            <div id="progressBar" 
+                 class="progress-bar progress-bar-striped progress-bar-animated bg-success" 
+                 role="progressbar" 
+                 style="width: 0%; transition: width 0.3s ease;">
+            </div>
+          </div>
+        </div>
+
+        <form id="publicForm" enctype="multipart/form-data">
+          <div id="dynamicFields"></div>
+
+          <!-- Кнопка отправки формы -->
+          <div id="submitContainer" class="d-flex justify-content-center mt-4 pt-2" style="display: none !important;">
+            <button type="submit" class="btn btn-primary btn-lg px-5">Отправить заявку</button>
+          </div>
+        </form>
+
+        <div id="successMessage" class="alert alert-success mt-4 text-center d-none" role="alert">
+          <h4 class="alert-heading">Спасибо!</h4>
+          <p class="mb-0">Ваш отклик успешно отправлен. Менеджер скоро свяжется с вами.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const pathParts = window.location.pathname.split('/');
+    const formId = pathParts[pathParts.length - 1];
+    let formFieldsConfig = [];
+
+    let lastActiveFieldId = null;
+    let formSubmittedSuccessfully = false;
+
+    document.addEventListener('DOMContentLoaded', () => {
+      loadFormData();
+    });
+
+    // Загрузка конфигурации формы и построение полей
+    async function loadFormData() {
+      try {
+        const res = await fetch(`/api/form/${formId}`);
+        if (!res.ok) {
+          document.getElementById('formTitle').innerText = 'Форма не найдена или деактивирована';
+          return;
+        }
+
+        const data = await res.json();
+        document.getElementById('formTitle').innerText = data.title;
+        
+        if (data.description) {
+          document.getElementById('formDescription').innerHTML = marked.parse(data.description);
+        }
+
+        formFieldsConfig = data.fields || [];
+
+        const container = document.getElementById('dynamicFields');
+        container.innerHTML = '';
+
+        // Постоянные лимиты для текстовых полей
+        const MAX_TEXT_LENGTH = 255;
+        const MAX_TEXTAREA_LENGTH = 2000;
+
+        formFieldsConfig.forEach(field => {
+          const wrapper = document.createElement('div');
+          wrapper.className = 'mb-3';
+
+          const reqMark = field.required ? '<span class="text-danger">*</span>' : '';
+          const reqAttr = field.required ? 'required' : '';
+
+          let inputHtml = '';
+
+          switch (field.type) {
+            case 'text':
+              inputHtml = `<input type="text" name="${field.id}" class="form-control" maxlength="${MAX_TEXT_LENGTH}" ${reqAttr}>`;
+              break;
+            case 'email':
+              inputHtml = `<input type="email" name="${field.id}" class="form-control" placeholder="name@example.com" maxlength="${MAX_TEXT_LENGTH}" ${reqAttr}>`;
+              break;
+            case 'number':
+              const minAttr = field.min !== null && field.min !== undefined ? `min="${field.min}"` : '';
+              const maxAttr = field.max !== null && field.max !== undefined ? `max="${field.max}"` : '';
+              // Ограничение числового поля 10 символами
+              inputHtml = `<input type="number" name="${field.id}" class="form-control" ${minAttr} ${maxAttr} oninput="if(this.value.length > 10) this.value = this.value.slice(0, 10);" ${reqAttr}>`;
+              break;
+            case 'textarea':
+              inputHtml = `<textarea name="${field.id}" class="form-control" rows="3" maxlength="${MAX_TEXTAREA_LENGTH}" ${reqAttr}></textarea>`;
+              break;
+            case 'file':
+              const allowedExts = field.allowedExtensions || ['.pdf', '.doc', '.docx'];
+              const acceptAttr = allowedExts.join(',');
+              inputHtml = `
+                <input type="file" name="${field.id}" class="form-control file-input" 
+                       accept="${acceptAttr}" 
+                       data-label="${field.label}" ${reqAttr}>
+                <div class="form-text text-muted small mt-1">Разрешенные форматы: ${allowedExts.join(', ').toUpperCase()} (макс. 3 МБ)</div>
+              `;
+              break;
+            case 'checkbox':
+              wrapper.className = 'mb-3 form-check mt-3';
+              inputHtml = `
+                <input type="checkbox" name="${field.id}" value="Да" class="form-check-input" id="${field.id}" ${reqAttr}>
+                <label class="form-check-label" for="${field.id}">${field.label} ${reqMark}</label>
+              `;
+              break;
+          }
+
+          if (field.type !== 'checkbox') {
+            wrapper.innerHTML = `
+              <label class="form-label">${field.label} ${reqMark}</label>
+              ${inputHtml}
+            `;
+          } else {
+            wrapper.innerHTML = inputHtml;
+          }
+
+          container.appendChild(wrapper);
+        });
+
+        document.getElementById('submitContainer').style.setProperty('display', 'flex', 'important');
+        attachAnalyticsTrackers();
+        initProgressBarTrackers();
+
+      } catch (err) {
+        console.error(err);
+        document.getElementById('formTitle').innerText = 'Ошибка при загрузке формы';
+      }
+    }
+
+    // Пересчет прогресса заполнения обязательных полей
+    function updateProgressBar() {
+      const requiredInputs = document.querySelectorAll('#publicForm [required]');
+      const total = requiredInputs.length;
+      
+      if (total === 0) {
+        document.getElementById('progressContainer').classList.add('d-none');
+        return;
+      }
+
+      let filledCount = 0;
+
+      requiredInputs.forEach(input => {
+        if (input.type === 'checkbox') {
+          if (input.checked) {
+            filledCount++;
+          }
+        } else if (input.type === 'file') {
+          if (input.files && input.files.length > 0) {
+            filledCount++;
+          }
+        } else {
+          if (input.value && input.value.trim() !== '') {
+            filledCount++;
+          }
+        }
+      });
+
+      if (filledCount > total) filledCount = total;
+
+      const percentage = Math.round((filledCount / total) * 100);
+
+      document.getElementById('progressText').innerText = `Заполнено ${filledCount} из ${total} обязательных полей`;
+      document.getElementById('progressPercent').innerText = `${percentage}%`;
+      
+      const progressBar = document.getElementById('progressBar');
+      progressBar.style.width = `${percentage}%`;
+
+      if (percentage === 100) {
+        progressBar.classList.remove('bg-warning', 'bg-primary');
+        progressBar.classList.add('bg-success');
+      } else if (percentage > 50) {
+        progressBar.classList.remove('bg-warning', 'bg-success');
+        progressBar.classList.add('bg-primary');
+      } else {
+        progressBar.classList.remove('bg-primary', 'bg-success');
+        progressBar.classList.add('bg-warning');
+      }
+    }
+
+    // Привязка обработчиков изменения к полям формы
+    function initProgressBarTrackers() {
+      const formInputs = document.querySelectorAll('#publicForm input, #publicForm textarea, #publicForm select');
+
+      formInputs.forEach(input => {
+        input.addEventListener('input', updateProgressBar);
+        input.addEventListener('change', updateProgressBar);
+      });
+
+      document.getElementById('progressContainer').classList.remove('d-none');
+      updateProgressBar();
+    }
+
+    // Отслеживание последнего активного поля для аналитики отвалов
+    function attachAnalyticsTrackers() {
+      const formInputs = document.querySelectorAll('#publicForm input, #publicForm textarea, #publicForm select');
+      
+      formInputs.forEach(input => {
+        input.addEventListener('focus', () => {
+          lastActiveFieldId = input.name;
+        });
+        input.addEventListener('input', () => {
+          lastActiveFieldId = input.name;
+        });
+      });
+    }
+
+    // Отправка события отвала при уходе со страницы
+    window.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden' && lastActiveFieldId && !formSubmittedSuccessfully) {
+        const data = JSON.stringify({ fieldId: lastActiveFieldId });
+        const blob = new Blob([data], { type: 'application/json' });
+        navigator.sendBeacon(`/api/form/${formId}/dropoff`, blob);
+      }
+    });
+
+    // Отправка формы на сервер
+    document.getElementById('publicForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+
+      const MAX_SIZE = 3 * 1024 * 1024;
+      const fileInputs = e.target.querySelectorAll('input[type="file"]');
+
+      for (let input of fileInputs) {
+        if (input.files && input.files[0]) {
+          const file = input.files[0];
+          const fieldId = input.getAttribute('name');
+          const fieldLabel = input.getAttribute('data-label') || 'Файл';
+
+          const fieldConfig = formFieldsConfig.find(f => f.id === fieldId);
+          const allowedExts = fieldConfig && fieldConfig.allowedExtensions ? fieldConfig.allowedExtensions : ['.pdf', '.doc', '.docx'];
+
+          if (file.size > MAX_SIZE) {
+            alert(`Ошибка: Размер файла в поле "${fieldLabel}" превышает 3 МБ (${(file.size / 1024 / 1024).toFixed(2)} МБ)`);
+            return;
+          }
+
+          const fileName = file.name.toLowerCase();
+          const isValidExt = allowedExts.some(ext => fileName.endsWith(ext));
+
+          if (!isValidExt) {
+            alert(`Ошибка в поле "${fieldLabel}": запрещенный формат файла. Разрешены только: ${allowedExts.join(', ').toUpperCase()}`);
+            return;
+          }
+        }
+      }
+
+      const formData = new FormData(e.target);
+
+      try {
+        const res = await fetch(`/api/form/${formId}`, {
+          method: 'POST',
+          body: formData
+        });
+
+        const result = await res.json();
+
+        if (result.success) {
+          formSubmittedSuccessfully = true;
+          document.getElementById('publicForm').classList.add('d-none');
+          document.getElementById('successMessage').classList.remove('d-none');
+        } else {
+          alert('Ошибка: ' + (result.error || 'Не удалось отправить форму'));
+        }
+      } catch (err) {
+        console.error(err);
+        alert('Произошла ошибка при отправке');
+      }
+    });
+  </script>
+</body>
+</html>

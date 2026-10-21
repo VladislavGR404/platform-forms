@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title id="pageTitle">Конструктор формы — Админка</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <!-- Библиотека для рендеринга Markdown -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <style>
+    body {
+      background-color: #f8f9fa;
+      color: #212529;
+    }
+    .main-container {
+      max-width: 1000px;
+    }
+    .form-card {
+      border: none;
+      border-radius: 12px;
+      box-shadow: 0 4px 24px rgba(0, 0, 0, 0.06);
+    }
+    .form-control, .form-select {
+      padding: 0.6rem 0.75rem;
+      border-radius: 8px;
+      border-color: #dee2e6;
+    }
+    .form-control:focus, .form-select:focus {
+      border-color: #86b7fe;
+      box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.15);
+    }
+    .btn-success {
+      padding: 0.75rem 3rem;
+      border-radius: 8px;
+      font-weight: 500;
+    }
+    .md-toolbar {
+      background-color: #f1f3f5;
+      border: 1px solid #dee2e6;
+      border-bottom: none;
+      border-top-left-radius: 8px;
+      border-top-right-radius: 8px;
+      padding: 6px 10px;
+    }
+    .md-textarea {
+      border-top-left-radius: 0 !important;
+      border-top-right-radius: 0 !important;
+    }
+    .md-preview-box {
+      border: 1px solid #dee2e6;
+      border-top-left-radius: 0;
+      border-top-right-radius: 0;
+      border-bottom-left-radius: 8px;
+      border-bottom-right-radius: 8px;
+      padding: 0.6rem 0.75rem;
+      background-color: #fff;
+      min-height: 98px;
+      cursor: text;
+    }
+  </style>
+</head>
+<body>
+  <div class="container py-5 main-container">
+    <div class="mb-4">
+      <a href="/admin" class="btn btn-outline-secondary btn-sm mb-3">&larr; Назад к списку форм</a>
+      <h2 class="fw-bold text-dark" id="headerTitle">Конструктор формы отклика</h2>
+    </div>
+
+    <form id="createForm">
+      <div class="card form-card mb-4">
+        <div class="card-body p-4">
+          <div class="mb-3">
+            <label class="form-label fw-bold">Название формы / Вакансии / Мероприятия</label>
+            <input type="text" id="formTitle" class="form-control" placeholder="Например: Стажировка Node.js Developer 2026" required>
+          </div>
+          
+          <!-- Описание с переключением между редактированием и предпросмотром Markdown -->
+          <div class="mb-0">
+            <div class="d-flex justify-content-between align-items-center mb-1">
+              <label class="form-label fw-bold mb-0">Описание / Инструкция</label>
+              <small class="text-muted" style="font-size: 0.8rem;">Кликните для редактирования, вне поля — готовый вид</small>
+            </div>
+
+            <!-- Панель кнопок форматирования -->
+            <div class="md-toolbar d-flex gap-1 align-items-center" id="mdToolbar">
+              <button type="button" class="btn btn-sm btn-light border py-1 px-2 fw-bold" onclick="insertMarkdown('bold')" title="Жирный">Ж</button>
+              <button type="button" class="btn btn-sm btn-light border py-1 px-2 fst-italic" onclick="insertMarkdown('italic')" title="Курсив">К</button>
+              <button type="button" class="btn btn-sm btn-light border py-1 px-2" onclick="insertMarkdown('link')" title="Вставить ссылку">🔗 Ссылка</button>
+              <button type="button" class="btn btn-sm btn-light border py-1 px-2" onclick="insertMarkdown('list')" title="Список">• Список</button>
+            </div>
+
+            <!-- Поле ввода описания -->
+            <textarea id="formDescription" class="form-control md-textarea" rows="3" placeholder="Заполните описание или инструкцию..."></textarea>
+
+            <!-- Предпросмотр описания -->
+            <div id="formDescriptionPreview" class="md-preview-box text-muted d-none">Кликните, чтобы добавить описание...</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card form-card mb-4">
+        <div class="card-body p-4">
+          <div class="d-flex justify-content-between align-items-center mb-3">
+            <h5 class="card-title fw-bold mb-0">Поля формы</h5>
+            <button type="button" class="btn btn-outline-primary btn-sm" onclick="addField()">+ Добавить поле</button>
+          </div>
+
+          <div id="fieldsContainer">
+            <!-- Динамически добавляемые поля конструктора -->
+          </div>
+        </div>
+      </div>
+
+      <!-- Кнопка отправки формы -->
+      <div class="text-center mt-4">
+        <button type="submit" id="submitBtn" class="btn btn-success btn-lg">Опубликовать форму</button>
+      </div>
+    </form>
+  </div>
+
+  <script>
+    let fieldCounter = 0;
+    let editingFormId = null;
+
+    document.addEventListener('DOMContentLoaded', () => {
+      const pathParts = window.location.pathname.split('/');
+      if (pathParts.includes('edit')) {
+        editingFormId = pathParts[pathParts.length - 1];
+        document.getElementById('pageTitle').innerText = 'Редактирование формы — Админка';
+        document.getElementById('headerTitle').innerText = 'Редактирование формы отклика';
+        document.getElementById('submitBtn').innerText = 'Сохранить изменения';
+        loadFormForEditing(editingFormId);
+      } else {
+        addField();
+      }
+
+      initMarkdownLiveToggle();
+    });
+
+    // Переключение между режимом редактирования и предпросмотром Markdown
+    function initMarkdownLiveToggle() {
+      const textarea = document.getElementById('formDescription');
+      const previewBox = document.getElementById('formDescriptionPreview');
+      const toolbar = document.getElementById('mdToolbar');
+
+      function updatePreview() {
+        const val = textarea.value.trim();
+        if (val) {
+          previewBox.innerHTML = marked.parse(val);
+          previewBox.classList.remove('text-muted');
+        } else {
+          previewBox.innerHTML = 'Кликните, чтобы добавить описание...';
+          previewBox.classList.add('text-muted');
+        }
+      }
+
+      // Клик по предпросмотру открывает textarea
+      previewBox.addEventListener('click', () => {
+        previewBox.classList.add('d-none');
+        toolbar.classList.remove('d-none');
+        textarea.classList.remove('d-none');
+        textarea.focus();
+      });
+
+      // Потеря фокуса вне поля и тулбара переключает на предпросмотр
+      textarea.addEventListener('blur', () => {
+        setTimeout(() => {
+          const activeEl = document.activeElement;
+          if (activeEl !== textarea && !toolbar.contains(activeEl)) {
+            updatePreview();
+            textarea.classList.add('d-none');
+            toolbar.classList.add('d-none');
+            previewBox.classList.remove('d-none');
+          }
+        }, 200);
+      });
+
+      // Инициализация при загрузке
+      updatePreview();
+      if (textarea.value.trim()) {
+        textarea.classList.add('d-none');
+        toolbar.classList.add('d-none');
+        previewBox.classList.remove('d-none');
+      }
+    }
+
+    // Вставка и удаление Markdown-разметки (toggle-режим)
+    function insertMarkdown(type) {
+      const textarea = document.getElementById('formDescription');
+      textarea.focus();
+
+      const start = textarea.selectionStart;
+      const end = textarea.selectionEnd;
+      const fullText = textarea.value;
+      const selectedText = fullText.substring(start, end);
+
+      let prefix = '';
+      let suffix = '';
+      let placeholder = '';
+
+      switch (type) {
+        case 'bold':
+          prefix = '**';
+          suffix = '**';
+          placeholder = 'жирный текст';
+          break;
+        case 'italic':
+          prefix = '*';
+          suffix = '*';
+          placeholder = 'курсив';
+          break;
+        case 'link':
+          prefix = '[';
+          suffix = '](https://example.com)';
+          placeholder = 'текст ссылки';
+          break;
+        case 'list':
+          prefix = '- ';
+          suffix = '';
+          placeholder = 'пункт списка';
+          break;
+      }
+
+      const isAlreadyWrapped = selectedText.startsWith(prefix) && selectedText.endsWith(suffix);
+      const isOutsideWrapped = start >= prefix.length && 
+                               end + suffix.length <= fullText.length && 
+                               fullText.substring(start - prefix.length, start) === prefix && 
+                               fullText.substring(end, end + suffix.length) === suffix;
+
+      if (isAlreadyWrapped) {
+        const unwrapped = selectedText.substring(prefix.length, selectedText.length - suffix.length);
+        textarea.setRangeText(unwrapped, start, end, 'select');
+      } else if (isOutsideWrapped) {
+        const unwrapped = selectedText;
+        textarea.setRangeText(unwrapped, start - prefix.length, end + suffix.length, 'select');
+      } else {
+        const contentToWrap = selectedText || placeholder;
+        const replacement = prefix + contentToWrap + suffix;
+        textarea.setRangeText(replacement, start, end, 'select');
+        
+        if (!selectedText) {
+          textarea.setSelectionRange(start + prefix.length, start + prefix.length + placeholder.length);
+        }
+      }
+    }
+
+    // Загрузка данных формы для редактирования
+    async function loadFormForEditing(id) {
+      try {
+        const res = await fetch(`/api/form/${id}`);
+        if (!res.ok) {
+          alert('Форма не найдена');
+          window.location.href = '/admin';
+          return;
+        }
+        const data = await res.json();
+        document.getElementById('formTitle').value = data.title;
+        document.getElementById('formDescription').value = data.description || '';
+
+        const previewBox = document.getElementById('formDescriptionPreview');
+        const textarea = document.getElementById('formDescription');
+        const toolbar = document.getElementById('mdToolbar');
+
+        if (data.description && data.description.trim()) {
+          previewBox.innerHTML = marked.parse(data.description);
+          previewBox.classList.remove('text-muted');
+          textarea.classList.add('d-none');
+          toolbar.classList.add('d-none');
+          previewBox.classList.remove('d-none');
+        }
+
+        const container = document.getElementById('fieldsContainer');
+        container.innerHTML = '';
+
+        data.fields.forEach(field => {
+          addField(field);
+        });
+      } catch (err) {
+        console.error(err);
+        alert('Ошибка при загрузке формы для редактирования');
+      }
+    }
+
+    // Добавление поля в конструктор
+    function addField(existingData = null) {
+      fieldCounter++;
+      const container = document.getElementById('fieldsContainer');
+      const fieldCard = document.createElement('div');
+      fieldCard.className = 'card mb-3 bg-light border-0';
+      fieldCard.id = `field-row-${fieldCounter}`;
+
+      // Сохранение исходного id поля при редактировании
+      // для сохранения связи с уже полученными ответами
+      if (existingData && existingData.id) {
+        fieldCard.dataset.fieldId = existingData.id;
+      }
+
+      const labelVal = existingData ? existingData.label : '';
+      const typeVal = existingData ? existingData.type : 'text';
+      const reqChecked = existingData && existingData.required ? 'checked' : '';
+      
+      const minVal = existingData && existingData.min !== null ? existingData.min : '';
+      const maxVal = existingData && existingData.max !== null ? existingData.max : '';
+      
+      const allowedExts = existingData && existingData.allowedExtensions ? existingData.allowedExtensions : ['.pdf', '.doc', '.docx'];
+
+      fieldCard.innerHTML = `
+        <div class="card-body p-3">
+          <div class="row g-2 align-items-center">
+            <div class="col-md-4">
+              <label class="form-label small text-muted mb-1">Заголовок поля</label>
+              <input type="text" class="form-control field-label" value="${labelVal}" placeholder="Например: Резюме" required>
+            </div>
+            <div class="col-md-3">
+              <label class="form-label small text-muted mb-1">Тип поля</label>
+              <select class="form-select field-type" onchange="toggleFieldSettings(${fieldCounter})">
+                <option value="text" ${typeVal === 'text' ? 'selected' : ''}>Текстовая строка</option>
+                <option value="email" ${typeVal === 'email' ? 'selected' : ''}>Email</option>
+                <option value="number" ${typeVal === 'number' ? 'selected' : ''}>Числовое поле</option>
+                <option value="textarea" ${typeVal === 'textarea' ? 'selected' : ''}>Многострочный текст</option>
+                <option value="file" ${typeVal === 'file' ? 'selected' : ''}>Загрузка файла</option>
+                <option value="checkbox" ${typeVal === 'checkbox' ? 'selected' : ''}>Чекбокс</option>
+              </select>
+            </div>
+            <div class="col-md-2 pt-4">
+              <div class="form-check">
+                <input class="form-check-input field-required" type="checkbox" id="req-${fieldCounter}" ${reqChecked}>
+                <label class="form-check-label small" for="req-${fieldCounter}">Обязательное</label>
+              </div>
+            </div>
+            <!-- Настройки числового поля -->
+            <div class="col-md-2 pt-3 number-settings ${typeVal === 'number' ? '' : 'd-none'}" id="num-settings-${fieldCounter}">
+              <label class="form-label small text-muted mb-1">Мин / Макс:</label>
+              <div class="input-group input-group-sm">
+                <input type="number" class="form-control field-min" value="${minVal}" placeholder="Мин">
+                <input type="number" class="form-control field-max" value="${maxVal}" placeholder="Макс">
+              </div>
+            </div>
+            <!-- Настройки файлового поля -->
+            <div class="col-md-2 pt-3 file-settings ${typeVal === 'file' ? '' : 'd-none'}" id="file-settings-${fieldCounter}">
+              <label class="form-label small text-muted mb-1">Форматы файлов:</label>
+              <div class="d-flex flex-wrap gap-1 small">
+                <div class="form-check"><input class="form-check-input ext-check" type="checkbox" value=".pdf" id="pdf-${fieldCounter}" ${allowedExts.includes('.pdf') ? 'checked' : ''}><label class="form-check-label" for="pdf-${fieldCounter}">PDF</label></div>
+                <div class="form-check"><input class="form-check-input ext-check" type="checkbox" value=".doc" id="doc-${fieldCounter}" ${allowedExts.includes('.doc') ? 'checked' : ''}><label class="form-check-label" for="doc-${fieldCounter}">DOC</label></div>
+                <div class="form-check"><input class="form-check-input ext-check" type="checkbox" value=".docx" id="docx-${fieldCounter}" ${allowedExts.includes('.docx') ? 'checked' : ''}><label class="form-check-label" for="docx-${fieldCounter}">DOCX</label></div>
+                <div class="form-check"><input class="form-check-input ext-check" type="checkbox" value=".txt" id="txt-${fieldCounter}" ${allowedExts.includes('.txt') ? 'checked' : ''}><label class="form-check-label" for="txt-${fieldCounter}">TXT</label></div>
+                <div class="form-check"><input class="form-check-input ext-check" type="checkbox" value=".rtf" id="rtf-${fieldCounter}" ${allowedExts.includes('.rtf') ? 'checked' : ''}><label class="form-check-label" for="rtf-${fieldCounter}">RTF</label></div>
+              </div>
+            </div>
+            <div class="col-md-1 text-end pt-4">
+              <button type="button" class="btn btn-outline-danger btn-sm" onclick="removeField(${fieldCounter})" title="Удалить поле">&times;</button>
+            </div>
+          </div>
+        </div>
+      `;
+
+      container.appendChild(fieldCard);
+    }
+
+    // Переключение видимости настроек в зависимости от типа поля
+    function toggleFieldSettings(id) {
+      const row = document.getElementById(`field-row-${id}`);
+      const type = row.querySelector('.field-type').value;
+      const numSettings = document.getElementById(`num-settings-${id}`);
+      const fileSettings = document.getElementById(`file-settings-${id}`);
+
+      numSettings.classList.add('d-none');
+      fileSettings.classList.add('d-none');
+
+      if (type === 'number') {
+        numSettings.classList.remove('d-none');
+      } else if (type === 'file') {
+        fileSettings.classList.remove('d-none');
+      }
+    }
+
+    // Удаление поля из конструктора
+    function removeField(id) {
+      const rows = document.querySelectorAll('#fieldsContainer .card');
+      if (rows.length <= 1) {
+        alert('Форма должна содержать хотя бы одно поле!');
+        return;
+      }
+      const el = document.getElementById(`field-row-${id}`);
+      if (el) el.remove();
+    }
+
+    // Отправка формы на сервер
+    document.getElementById('createForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+
+      const title = document.getElementById('formTitle').value.trim();
+      const description = document.getElementById('formDescription').value.trim();
+      const fieldRows = document.querySelectorAll('#fieldsContainer .card');
+      const fields = [];
+
+      fieldRows.forEach((row, index) => {
+        const label = row.querySelector('.field-label').value.trim();
+        const type = row.querySelector('.field-type').value;
+        const required = row.querySelector('.field-required').checked;
+
+        const minVal = row.querySelector('.field-min') ? row.querySelector('.field-min').value : '';
+        const maxVal = row.querySelector('.field-max') ? row.querySelector('.field-max').value : '';
+
+        const allowedExtensions = [];
+        if (type === 'file') {
+          row.querySelectorAll('.ext-check:checked').forEach(chk => {
+            allowedExtensions.push(chk.value);
+          });
+        }
+
+        // При редактировании исходный id поля сохраняется,
+        // чтобы ответы продолжали сопоставляться с полями.
+        // Новый id генерируется только для новых полей.
+        const existingId = row.dataset.fieldId;
+        const fieldId = existingId || `field_${index + 1}_${Date.now()}`;
+
+        fields.push({
+          id: fieldId,
+          label,
+          type,
+          required,
+          min: minVal !== '' ? Number(minVal) : null,
+          max: maxVal !== '' ? Number(maxVal) : null,
+          allowedExtensions: allowedExtensions.length > 0 ? allowedExtensions : ['.pdf', '.doc', '.docx']
+        });
+      });
+
+      const payload = {
+        title,
+        description,
+        fields,
+        ...(editingFormId ? { id: editingFormId } : {})
+      };
+
+      try {
+        const response = await fetch('/api/forms', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        const data = await response.json();
+        if (data.success) {
+          alert(editingFormId ? 'Форма успешно обновлена!' : 'Форма успешно создана!');
+          window.location.href = '/admin';
+        } else {
+          alert('Ошибка: ' + (data.error || 'Не удалось сохранить форму'));
+        }
+      } catch (err) {
+        console.error(err);
+        alert('Ошибка при отправке данных на сервер');
+      }
+    });
+  </script>
+</body>
+</html>

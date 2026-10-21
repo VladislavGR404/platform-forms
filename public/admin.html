@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Админ-панель — Карьерная платформа</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    .user-list-item { cursor: pointer; transition: background 0.2s; }
+    .user-list-item:hover { background-color: #f8f9fa; }
+    .user-list-item.active { background-color: #e9ecef; border-left: 4px solid #0d6efd; }
+  </style>
+</head>
+<body class="bg-light">
+  <div class="container py-5">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+      <h2>Панель управления формами</h2>
+      <a href="/admin/create" class="btn btn-primary">+ Создать новую форму</a>
+    </div>
+
+    <div class="card shadow-sm mb-4">
+      <div class="card-body">
+        <h5 class="card-title mb-3">Созданные формы</h5>
+        <div class="table-responsive">
+          <table class="table table-hover align-middle">
+            <thead>
+              <tr>
+                <th>Название</th>
+                <th>Уникальная ссылка</th>
+                <th>Дата создания</th>
+                <th class="text-end">Действия</th>
+              </tr>
+            </thead>
+            <tbody id="formsTableBody">
+              <tr>
+                <td colspan="4" class="text-center text-muted py-4">Загрузка...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Модальное окно просмотра ответов и аналитики -->
+    <div class="modal fade" id="submissionsModal" tabindex="-1">
+      <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title" id="submissionsModalLabel">Ответы студентов</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+          </div>
+          <div class="modal-body" id="submissionsModalBody">
+            <!-- Динамический контент -->
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script>
+    let submissionsModal;
+    let currentFormFields = []; // Поля текущей формы для отрисовки деталей
+    let currentFormTitle = '';  // Название текущей формы для имени файла
+
+    // Экранирование HTML для защиты от XSS
+    function escapeHTML(str) {
+      if (typeof str !== 'string') return str;
+      return str.replace(/[&<>'"]/g, 
+        tag => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[tag])
+      );
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      submissionsModal = new bootstrap.Modal(document.getElementById('submissionsModal'));
+      loadForms();
+    });
+
+    // Загрузка списка форм
+    async function loadForms() {
+      try {
+        const res = await fetch('/api/forms');
+        const forms = await res.json();
+        const tbody = document.getElementById('formsTableBody');
+
+        if (!forms.length) {
+          tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-4">Формы еще не созданы</td></tr>';
+          return;
+        }
+
+        tbody.innerHTML = forms.map(f => {
+          const publicUrl = `${window.location.origin}/form/${f.id}`;
+          const date = new Date(f.created_at).toLocaleString('ru-RU');
+          return `
+            <tr>
+              <td class="fw-bold">${escapeHTML(f.title)}</td>
+              <td>
+                <div class="d-flex align-items-center gap-2">
+                  <a href="${publicUrl}" target="_blank" class="text-decoration-none text-truncate" style="max-width: 260px;">${publicUrl}</a>
+                  <button class="btn btn-sm btn-outline-secondary py-0 px-2" onclick="copyLink('${publicUrl}', this)" style="font-size: 0.8rem;">Копировать</button>
+                </div>
+              </td>
+              <td class="text-muted">${date}</td>
+              <td class="text-end">
+                <button class="btn btn-sm btn-outline-warning me-1" onclick="viewAnalytics('${f.id}', '${escapeHTML(f.title)}')">Воронка</button>
+                <button class="btn btn-sm btn-outline-primary me-1" onclick="editForm('${f.id}')">Редактировать</button>
+                <button class="btn btn-sm btn-outline-info me-1" onclick="viewSubmissions('${f.id}', '${escapeHTML(f.title)}')">Ответы</button>
+                <button class="btn btn-sm btn-outline-danger" onclick="deleteForm('${f.id}', '${escapeHTML(f.title)}')">Удалить</button>
+              </td>
+            </tr>
+          `;
+        }).join('');
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    // Копирование ссылки в буфер обмена
+    function copyLink(url, btnElement) {
+      navigator.clipboard.writeText(url).then(() => {
+        const originalText = btnElement.innerText;
+        btnElement.innerText = 'Скопировано!';
+        btnElement.classList.remove('btn-outline-secondary');
+        btnElement.classList.add('btn-success');
+
+        setTimeout(() => {
+          btnElement.innerText = originalText;
+          btnElement.classList.remove('btn-success');
+          btnElement.classList.add('btn-outline-secondary');
+        }, 2000);
+      }).catch(err => {
+        alert('Не удалось скопировать ссылку');
+      });
+    }
+
+    // Переход на страницу редактирования формы
+    function editForm(formId) {
+      window.location.href = `/admin/edit/${formId}`;
+    }
+
+    // Удаление формы со всеми связанными данными
+    async function deleteForm(formId, formTitle) {
+      if (!confirm(`Вы действительно хотите удалить форму "${formTitle}"?\nВсе полученные ответы и аналитика также будут удалены!`)) return;
+
+      try {
+        const res = await fetch(`/api/forms/${formId}`, { method: 'DELETE' });
+        const result = await res.json();
+
+        if (result.success) {
+          alert('Форма успешно удалена');
+          loadForms();
+        } else {
+          alert('Ошибка: ' + (result.error || 'Не удалось удалить форму'));
+        }
+      } catch (err) {
+        alert('Произошла ошибка при удалении');
+      }
+    }
+
+    // Отображение воронки конверсии и статистики отвалов
+    async function viewAnalytics(formId, formTitle) {
+      document.getElementById('submissionsModalLabel').innerText = `Воронка конверсии: ${formTitle}`;
+      const modalBody = document.getElementById('submissionsModalBody');
+      modalBody.innerHTML = '<p class="text-muted text-center py-4">Загрузка аналитики...</p>';
+      submissionsModal.show();
+
+      try {
+        const [formRes, analyticsRes] = await Promise.all([
+          fetch(`/api/form/${formId}`),
+          fetch(`/api/forms/${formId}/analytics`)
+        ]);
+
+        const formData = await formRes.json();
+        const stats = await analyticsRes.json();
+
+        const conversionRate = stats.totalViews > 0 
+          ? ((stats.completedCount / stats.totalViews) * 100).toFixed(1) 
+          : 0;
+
+        let html = `
+          <div class="row text-center mb-4">
+            <div class="col-md-4">
+              <div class="p-3 bg-light rounded border">
+                <h6 class="text-muted mb-1">Всего просмотров</h6>
+                <h3 class="mb-0">${stats.totalViews}</h3>
+              </div>
+            </div>
+            <div class="col-md-4">
+              <div class="p-3 bg-light rounded border">
+                <h6 class="text-muted mb-1">Заполнено до конца</h6>
+                <h3 class="text-success mb-0">${stats.completedCount}</h3>
+              </div>
+            </div>
+            <div class="col-md-4">
+              <div class="p-3 bg-light rounded border">
+                <h6 class="text-muted mb-1">Конверсия формы</h6>
+                <h3 class="text-primary mb-0">${conversionRate}%</h3>
+              </div>
+            </div>
+          </div>
+
+          <h5 class="mb-3">Аналитика отвалов по полям:</h5>
+          <div class="list-group mb-3">
+        `;
+
+        formData.fields.forEach(field => {
+          const dropCount = stats.dropMap[field.id] || 0;
+          const dropPercentage = stats.totalDropouts > 0 
+            ? ((dropCount / stats.totalDropouts) * 100).toFixed(1) 
+            : 0;
+
+          html += `
+            <div class="list-group-item">
+              <div class="d-flex justify-content-between align-items-center mb-1">
+                <strong>${escapeHTML(field.label)}</strong>
+                <span class="badge bg-danger rounded-pill">${dropCount} отвалов (${dropPercentage}%)</span>
+              </div>
+              <div class="progress" style="height: 8px;">
+                <div class="progress-bar bg-danger" role="progressbar" style="width: ${dropPercentage}%"></div>
+              </div>
+            </div>
+          `;
+        });
+
+        html += '</div>';
+        modalBody.innerHTML = html;
+
+      } catch (err) {
+        modalBody.innerHTML = '<div class="alert alert-danger">Ошибка при загрузке аналитики</div>';
+      }
+    }
+
+    // Отображение вкладок с ответами
+    async function viewSubmissions(formId, formTitle) {
+      const modalBody = document.getElementById('submissionsModalBody');
+      modalBody.innerHTML = '<p class="text-muted text-center py-4">Загрузка данных ответов...</p>';
+      submissionsModal.show();
+
+      try {
+        const [formRes, subRes] = await Promise.all([
+          fetch(`/api/form/${formId}`),
+          fetch(`/api/forms/${formId}/submissions`)
+        ]);
+
+        const form = await formRes.json();
+        const submissions = await subRes.json();
+        currentFormFields = form.fields; // Сохраняем поля для последующей отрисовки
+        currentFormTitle = form.title || formTitle;
+
+        document.getElementById('submissionsModalLabel').innerText = currentFormTitle;
+
+        if (!submissions.length) {
+          modalBody.innerHTML = `
+            <div class="text-center text-muted py-4">Ответов пока нет</div>
+          `;
+          return;
+        }
+
+        // Безопасные JSON-строки для передачи в onclick
+        const safeFormJson = JSON.stringify(form).replace(/'/g, "&#39;");
+        const safeSubsJson = JSON.stringify(submissions).replace(/'/g, "&#39;");
+
+        // Интерфейс с вкладками
+        let html = `
+          <ul class="nav nav-tabs mb-3" id="subTabs" role="tablist">
+            <li class="nav-item" role="presentation">
+              <button class="nav-link active fw-bold" id="table-tab" data-bs-toggle="tab" data-bs-target="#table-pane" type="button" role="tab">Общая таблица</button>
+            </li>
+            <li class="nav-item" role="presentation">
+              <button class="nav-link fw-bold" id="users-tab" data-bs-toggle="tab" data-bs-target="#users-pane" type="button" role="tab">По пользователям</button>
+            </li>
+          </ul>
+          
+          <div class="tab-content" id="subTabsContent">
+            <!-- Вкладка 1: общая таблица -->
+            <div class="tab-pane fade show active" id="table-pane" role="tabpanel">
+              
+              <!-- Шапка таблицы с кнопкой экспорта -->
+              <div class="d-flex justify-content-between align-items-center mb-3">
+                <span class="fw-bold fs-6">Всего ответов: ${submissions.length}</span>
+                <button class="btn btn-sm btn-outline-success" onclick='exportToCSV(${safeFormJson}, ${safeSubsJson})'>
+                  Экспорт всех
+                </button>
+              </div>
+
+              <div class="table-responsive">
+                <table class="table table-bordered table-hover align-middle bg-white mb-0">
+                  <thead class="table-light">
+                    <tr>
+                      <th style="width: 80px;">ID</th>
+                      <th style="width: 170px;">Дата</th>
+                      ${form.fields.map(f => `<th>${escapeHTML(f.label)}</th>`).join('')}
+                    </tr>
+                  </thead>
+                  <tbody>
+        `;
+
+        // Заполнение строк таблицы
+        submissions.forEach(sub => {
+          const dateStr = new Date(sub.submitted_at).toLocaleString('ru-RU');
+          const shortId = sub.id ? sub.id.toString().substring(0, 8) : '—';
+          html += `<tr><td><span class="badge bg-secondary">${shortId}</span></td><td><small class="text-muted">${dateStr}</small></td>`;
+
+          form.fields.forEach(field => {
+            let val = sub.answers ? sub.answers[field.id] : '';
+            if (val && typeof val === 'string' && val.startsWith('/uploads/')) {
+              val = `<a href="${val}" target="_blank" class="btn btn-sm btn-outline-primary text-nowrap">Скачать</a>`;
+            } else if (val === null || val === undefined || val === '') {
+              val = '<span class="text-muted">—</span>';
+            } else if (val === true || val === 'Да') {
+              val = `<span class="badge bg-success">Да</span>`;
+            } else {
+              val = escapeHTML(val);
+            }
+            html += `<td>${val}</td>`;
+          });
+          html += `</tr>`;
+        });
+        html += `</tbody></table></div></div>`;
+
+        // Вкладка 2: по пользователям (список слева, детали справа)
+        html += `
+            <div class="tab-pane fade" id="users-pane" role="tabpanel">
+              <div class="row" style="min-height: 400px;">
+                <!-- Левая колонка: список пользователей -->
+                <div class="col-md-4 border-end" style="max-height: 500px; overflow-y: auto;">
+                  <div class="list-group list-group-flush" id="userList">
+        `;
+
+        submissions.forEach((sub, index) => {
+          const dateStr = new Date(sub.submitted_at).toLocaleString('ru-RU');
+          
+          // Поиск имени или email для отображения в списке
+          let displayName = `Пользователь #${sub.id}`;
+          for (const field of form.fields) {
+            if (field.type === 'text' || field.type === 'email') {
+              const val = sub.answers[field.id];
+              if (val) {
+                displayName = val;
+                if (field.type === 'email') break; // Приоритет email
+              }
+            }
+          }
+
+          html += `
+            <div class="list-group-item list-group-item-action user-list-item p-3" onclick="renderUserDetails(${index}, ${JSON.stringify(sub).replace(/'/g, "&#39;").replace(/"/g, '&quot;')})">
+              <div class="d-flex justify-content-between align-items-center mb-1">
+                <strong class="text-truncate" style="max-width: 180px;">${escapeHTML(displayName)}</strong>
+                <span class="badge bg-secondary">#${sub.id}</span>
+              </div>
+              <small class="text-muted d-block">${dateStr}</small>
+            </div>
+          `;
+        });
+
+        html += `
+                  </div>
+                </div>
+                <!-- Правая колонка: детали выбранного пользователя -->
+                <div class="col-md-8 p-4" id="userDetailsArea">
+                  <div class="text-center text-muted mt-5">
+                    <p>Выберите пользователя из списка слева, чтобы просмотреть его ответы</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        `;
+
+        modalBody.innerHTML = html;
+
+      } catch (err) {
+        console.error(err);
+        modalBody.innerHTML = '<div class="alert alert-danger">Ошибка при загрузке ответов</div>';
+      }
+    }
+
+    // Отрисовка деталей выбранного пользователя
+    function renderUserDetails(index, submission) {
+      // Подсветка активного пользователя
+      document.querySelectorAll('.user-list-item').forEach(el => el.classList.remove('active'));
+      document.querySelectorAll('.user-list-item')[index].classList.add('active');
+
+      const area = document.getElementById('userDetailsArea');
+      const dateStr = new Date(submission.submitted_at).toLocaleString('ru-RU');
+      
+      // JSON текущего ответа для экспорта
+      const safeSubJson = JSON.stringify(submission).replace(/'/g, "&#39;");
+
+      let detailsHtml = `
+        <div class="d-flex justify-content-between align-items-center mb-4 pb-3 border-bottom">
+          <div>
+            <h5 class="fw-bold mb-0">Анкета от ${dateStr}</h5>
+            <span class="badge bg-secondary mt-1">ID: ${submission.id}</span>
+          </div>
+          <button class="btn btn-sm btn-outline-success" onclick='exportToCSV(${JSON.stringify({ title: currentFormTitle, fields: currentFormFields }).replace(/'/g, "&#39;")}, [${safeSubJson}])'>
+            Экспорт пользователя
+          </button>
+        </div>
+        <div class="row g-3">
+      `;
+
+      currentFormFields.forEach(field => {
+        let val = submission.answers ? submission.answers[field.id] : '';
+
+        if (val && typeof val === 'string' && val.startsWith('/uploads/')) {
+          val = `<a href="${val}" target="_blank" class="btn btn-sm btn-outline-primary">Скачать прикрепленный файл</a>`;
+        } else if (val === null || val === undefined || val === '') {
+          val = '<span class="text-muted fst-italic">Не заполнено</span>';
+        } else if (val === true || val === 'Да') {
+          val = `<span class="badge bg-success">Да</span>`;
+        } else {
+          val = `<div class="p-2 bg-light rounded border" style="white-space: pre-wrap;">${escapeHTML(val)}</div>`;
+        }
+
+        detailsHtml += `
+          <div class="col-12">
+            <label class="small text-muted text-uppercase fw-bold mb-1">${escapeHTML(field.label)}</label>
+            <div>${val}</div>
+          </div>
+        `;
+      });
+
+      detailsHtml += '</div>';
+      area.innerHTML = detailsHtml;
+    }
+
+    // Выгрузка ответов в CSV (принимает массив, в том числе из одного элемента)
+    function exportToCSV(form, submissions) {
+      if (!submissions || submissions.length === 0) {
+        alert('Нет данных для выгрузки');
+        return;
+      }
+
+      // Заголовки: ID, дата и названия всех полей
+      const headers = ['ID', 'Дата отправки', ...form.fields.map(f => f.label)];
+      
+      // Строки с данными
+      const rows = submissions.map(sub => {
+        const dateStr = new Date(sub.submitted_at).toLocaleString('ru-RU');
+        
+        // Ответы в порядке заголовков
+        const answers = form.fields.map(field => {
+          let val = sub.answers ? sub.answers[field.id] : '';
+          
+          if (val === null || val === undefined) return '';
+          if (val === true || val === 'Да') return 'Да';
+          
+          // Экранирование кавычек для CSV
+          const stringVal = String(val).replace(/"/g, '""');
+          return `"${stringVal}"`;
+        });
+
+        return [sub.id, `"${dateStr}"`, ...answers].join(';');
+      });
+
+      // Сборка CSV с BOM для корректной кириллицы в Excel
+      const csvContent = '\uFEFF' + headers.join(';') + '\n' + rows.join('\n');
+
+      // Скачивание файла
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      
+      link.setAttribute('href', url);
+      
+      // Имя файла: при выгрузке одного ответа добавляется его ID
+      const safeTitle = form.title.replace(/[^a-zA-Z0-9а-яА-Я_\- ]/g, '_');
+      const suffix = submissions.length === 1 ? `_ID_${submissions[0].id}` : '_все';
+      
+      link.setAttribute('download', `Ответы_${safeTitle}${suffix}.csv`);
+      
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+  </script>
+</body>
+</html>
